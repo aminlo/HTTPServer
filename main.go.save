@@ -1,0 +1,14 @@
+package main
+
+import (
+	"net/http"
+)
+
+func HttpServer {
+	Mux := http.NewServeMux()
+}
+
+
+func main () {
+	HttpServer()
+}

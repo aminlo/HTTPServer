@@ -17,6 +17,7 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
+	PLATFORM       string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -71,6 +72,39 @@ func validate_chirp(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"valid": true})
 }
 
+func (cfg *apiConfig) apiuser(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	type Email struct {
+		Emailid string `json:"email"`
+	}
+	var email Email
+	if err := json.NewDecoder(r.Body).Decode(&email); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+		return
+	}
+	// email stored
+
+	user, err := cfg.dbQueries.CreateUser(r.Context(), email.Emailid)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create user"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":         user.ID,
+		"created_at": user.CreatedAt,
+		"updated_at": user.UpdatedAt,
+		"email":      user.Email,
+	})
+
+}
+
 func HttpServer() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -82,6 +116,7 @@ func HttpServer() {
 
 	apiCfg := &apiConfig{
 		dbQueries: dbQueries,
+		PLATFORM:  os.Getenv("PLATFORM"),
 	}
 	mux := http.NewServeMux()
 	server := http.Server{
@@ -94,6 +129,7 @@ func HttpServer() {
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
 	mux.HandleFunc("POST /api/validate_chirp", validate_chirp)
+	mux.HandleFunc("POST /api/users", apiCfg.apiuser)
 
 	log.Println("Starting server on :8080")
 	if err := server.ListenAndServe(); err != nil {

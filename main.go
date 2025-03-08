@@ -1,15 +1,21 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"sync/atomic"
+
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	dbQueries      *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -65,7 +71,17 @@ func validate_chirp(w http.ResponseWriter, r *http.Request) {
 }
 
 func HttpServer() {
-	apiCfg := &apiConfig{}
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to the database: %v", err)
+	}
+	dbQueries := database.New(db)
+
+	apiCfg := &apiConfig{
+		dbQueries: dbQueries,
+	}
 	mux := http.NewServeMux()
 	server := http.Server{
 		Handler: mux,

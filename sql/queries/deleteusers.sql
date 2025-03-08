@@ -1,2 +1,2 @@
 -- name: DeleteUsers :exec
-TRUNCATE TABLE table_name;
+TRUNCATE TABLE users;

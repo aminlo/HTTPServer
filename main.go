@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"httpserv/internal/database"
 	"log"
 	"net/http"
 	"os"

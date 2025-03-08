@@ -35,41 +35,28 @@ func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
 	cfg.fileserverHits.Store(0)
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+
+	if cfg.PLATFORM != "dev" {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	err := cfg.dbQueries.DeleteUsers(r.Context())
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create user"})
+		return
+	}
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Hits reset to 0"))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"success": "all users deleted.", "reset": "Hits reset to 0"})
+
 }
 
 func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
-}
-
-type Chirp struct {
-	Body string `json:"body"`
-}
-
-func validate_chirp(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-	var chirp Chirp
-	if err := json.NewDecoder(r.Body).Decode(&chirp); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
-		return
-	}
-
-	if len(chirp.Body) > 140 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Chirp is too long"})
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]bool{"valid": true})
 }
 
 func (cfg *apiConfig) apiuser(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +77,7 @@ func (cfg *apiConfig) apiuser(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create user"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create user", "details": err.Error()})
 		return
 	}
 
@@ -101,6 +88,48 @@ func (cfg *apiConfig) apiuser(w http.ResponseWriter, r *http.Request) {
 		"created_at": user.CreatedAt,
 		"updated_at": user.UpdatedAt,
 		"email":      user.Email,
+	})
+
+}
+
+type Chirp struct {
+	Body    string `json:"body"`
+	User_id string `json:"user_id"`
+}
+
+func (cfg *apiConfig) post(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	var chirp Chirp
+	if err := json.NewDecoder(r.Body).Decode(&chirp); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+		return
+	}
+
+	if len(chirp.Body) > 140 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Chirp is too long"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"valid": true})
+	post, err := cfg.dbQueries.CreateChirp(r.Context(), chirp.Body, chirp.User_id)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "error making db request,", "details": err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":         post.ID,
+		"created_at": post.CreatedAt,
+		"updated_at": post.UpdatedAt,
+		"body":       post.Body,
+		"email":      post.Email,
 	})
 
 }
@@ -128,8 +157,8 @@ func HttpServer() {
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
-	mux.HandleFunc("POST /api/validate_chirp", validate_chirp)
 	mux.HandleFunc("POST /api/users", apiCfg.apiuser)
+	mux.HandleFunc("POST /api/chirps", apiCfg.post)
 
 	log.Println("Starting server on :8080")
 	if err := server.ListenAndServe(); err != nil {

@@ -1,0 +1,8 @@
+POST http://localhost:8080/api/users HTTP/1.1
+Content-Type: application/json
+Content-Length: 62
+
+{
+    "email": "tsesst@gmail.com",
+    "password": "securepassword123"
+}

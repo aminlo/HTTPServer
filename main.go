@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	hash "httpserv/internal/auth"
 	"httpserv/internal/database"
 	"log"
 	"net/http"
@@ -60,21 +61,34 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
+type Email struct {
+	Emailid  string `json:"email"`
+	Password string `json:"password"`
+}
+
 func (cfg *apiConfig) apiuser(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	type Email struct {
-		Emailid string `json:"email"`
-	}
-	var email Email
-	if err := json.NewDecoder(r.Body).Decode(&email); err != nil {
+
+	var userstruct Email
+	if err := json.NewDecoder(r.Body).Decode(&userstruct); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
 		return
 	}
 	// email stored
+	hashedpass, err := hash.HashPassword(userstruct.Password)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to hash pass", "details": err.Error()})
+		return
+	}
 
-	user, err := cfg.dbQueries.CreateUser(r.Context(), email.Emailid)
+	user, err := cfg.dbQueries.CreateUser(r.Context(), database.CreateUserParams{
+		Email:          userstruct.Emailid,
+		HashedPassword: hashedpass,
+	})
+
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -169,6 +183,37 @@ func (cfg *apiConfig) specchirps(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(post)
 }
 
+func (cfg *apiConfig) apilogin(w http.ResponseWriter, r *http.Request) {
+	var login Email
+	if err := json.NewDecoder(r.Body).Decode(&login); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body", "details": err.Error()})
+		return
+	}
+	user, err := cfg.dbQueries.GetPwByEmail(r.Context(), login.Emailid)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"error": "idk", "details": err.Error()})
+		return
+	}
+	err = hash.CheckPasswordHash(login.Password, user.HashedPassword)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "wrongff pw buiddy", "details": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":         user.ID,
+		"created_at": user.CreatedAt,
+		"updated_at": user.UpdatedAt,
+		"email":      user.Email,
+	})
+}
+
 func HttpServer() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -191,11 +236,12 @@ func HttpServer() {
 	mux.HandleFunc("GET /api/healthz", readinessHandler)                                                       // check status
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir("."))))) // deliver files
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)                                                // metics
-	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)                                                   // reset usewrs
-	mux.HandleFunc("POST /api/users", apiCfg.apiuser)                                                          // add user
+	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)                                                   // reset usewrs                                                         // add user
 	mux.HandleFunc("POST /api/chirps", apiCfg.post)                                                            // add post
-	mux.HandleFunc("GET /api/chirps", apiCfg.getchirps)                                                        // get post of user
+	mux.HandleFunc("GET /api/chirps", apiCfg.getchirps)                                                        // get post of users
 	mux.HandleFunc("GET /api/chirps/{id}", apiCfg.specchirps)
+	mux.HandleFunc("POST /api/users", apiCfg.apiuser)
+	mux.HandleFunc("POST /api/login", apiCfg.apilogin)
 
 	log.Println("Starting server on :8080")
 	if err := server.ListenAndServe(); err != nil {

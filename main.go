@@ -127,7 +127,7 @@ func (cfg *apiConfig) post(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "error making db request,", "details": err.Error()})
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":         post.ID,
 		"created_at": post.CreatedAt,
@@ -136,6 +136,37 @@ func (cfg *apiConfig) post(w http.ResponseWriter, r *http.Request) {
 		"user_id":    post.UserID,
 	})
 
+}
+
+func (cfg *apiConfig) getchirps(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	posts, err := cfg.dbQueries.GetAllChirps(r.Context())
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "error fetching,", "details": err.Error()})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(posts)
+}
+
+func (cfg *apiConfig) specchirps(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id") // Extracts `{id}` from the pat
+	uuid, err := uuid.Parse(id)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid UUID format", "details": err.Error()})
+		return
+	}
+
+	post, err := cfg.dbQueries.GetPost(r.Context(), uuid)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]string{"error": "error getting id,", "details": err.Error()})
+	}
+	json.NewEncoder(w).Encode(post)
 }
 
 func HttpServer() {
@@ -157,12 +188,14 @@ func HttpServer() {
 		Addr:    ":8080",
 	}
 
-	mux.HandleFunc("GET /api/healthz", readinessHandler)
-	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(".")))))
-	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)
-	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
-	mux.HandleFunc("POST /api/users", apiCfg.apiuser)
-	mux.HandleFunc("POST /api/chirps", apiCfg.post)
+	mux.HandleFunc("GET /api/healthz", readinessHandler)                                                       // check status
+	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir("."))))) // deliver files
+	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)                                                // metics
+	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)                                                   // reset usewrs
+	mux.HandleFunc("POST /api/users", apiCfg.apiuser)                                                          // add user
+	mux.HandleFunc("POST /api/chirps", apiCfg.post)                                                            // add post
+	mux.HandleFunc("GET /api/chirps", apiCfg.getchirps)                                                        // get post of user
+	mux.HandleFunc("GET /api/chirps/{id}", apiCfg.specchirps)
 
 	log.Println("Starting server on :8080")
 	if err := server.ListenAndServe(); err != nil {

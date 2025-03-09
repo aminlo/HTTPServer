@@ -1,9 +1,0 @@
-POST http://localhost:8080/api/users HTTP/1.1
-Content-Type: application/json
-Content-Length: 30
-
-{
-    "email": "tsest@gmail.com"
-}
-
-# POST http://localhost:8080/admin/reset HTTP/1.1

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync/atomic"
 
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -44,7 +45,7 @@ func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create user"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to delete user", "details": err.Error()})
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -93,8 +94,8 @@ func (cfg *apiConfig) apiuser(w http.ResponseWriter, r *http.Request) {
 }
 
 type Chirp struct {
-	Body    string `json:"body"`
-	User_id string `json:"user_id"`
+	Body    string    `json:"body"`
+	User_id uuid.UUID `json:"user_id"`
 }
 
 func (cfg *apiConfig) post(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +104,7 @@ func (cfg *apiConfig) post(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&chirp); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body", "details": err.Error()})
 		return
 	}
 
@@ -115,21 +116,24 @@ func (cfg *apiConfig) post(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]bool{"valid": true})
-	post, err := cfg.dbQueries.CreateChirp(r.Context(), chirp.Body, chirp.User_id)
+
+	post, err := cfg.dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{
+		Body:   chirp.Body,
+		UserID: chirp.User_id,
+	})
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "error making db request,", "details": err.Error()})
 		return
 	}
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":         post.ID,
 		"created_at": post.CreatedAt,
 		"updated_at": post.UpdatedAt,
 		"body":       post.Body,
-		"email":      post.Email,
+		"user_id":    post.UserID,
 	})
 
 }

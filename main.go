@@ -241,6 +241,19 @@ func (cfg *apiConfig) apilogin(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to make refresh token", "details": err.Error()})
 		return
 	}
+	expires := time.Now().Add(60 * 24 * time.Hour)
+	rtoken, err := cfg.dbQueries.NewRToken(r.Context(), database.NewRTokenParams{
+		Token:     refreshmade,
+		UserID:    user.ID,
+		ExpiresAt: expires,
+	})
+
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create user", "details": err.Error()})
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -250,7 +263,7 @@ func (cfg *apiConfig) apilogin(w http.ResponseWriter, r *http.Request) {
 		"updated_at":    user.UpdatedAt,
 		"email":         user.Email,
 		"token":         jwtmade,
-		"refresh_token": refreshmade,
+		"refresh_token": rtoken.Token,
 	})
 }
 
@@ -288,6 +301,7 @@ func HttpServer() {
 	// api user, login reqs
 	mux.HandleFunc("POST /api/users", apiCfg.apiuser)
 	mux.HandleFunc("POST /api/login", apiCfg.apilogin)
+	mux.HandleFunc("POST /api/refresh", apiCfg.apirefresh)
 
 	log.Println("Starting server on :8080")
 	if err := server.ListenAndServe(); err != nil {

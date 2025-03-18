@@ -310,7 +310,7 @@ func (cfg *apiConfig) apirevoke(w http.ResponseWriter, r *http.Request) {
 
 	err = cfg.dbQueries.RevokeRToken(r.Context(), database.RevokeRTokenParams{
 		Token:     bearerToken,
-		RevokedAt: time.Now(),
+		RevokedAt: sql.NullTime{Time: time.Now(), Valid: true},
 		UpdatedAt: time.Now(),
 	})
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -20,6 +21,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
 	PLATFORM       string
+	JWTstring      string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -121,7 +123,21 @@ func (cfg *apiConfig) post(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body", "details": err.Error()})
 		return
 	}
+	bearertoken, err := hash.GetBearerToken(r.Header)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid parsing header", "details": err.Error()})
+		return
+	}
 
+	jwtuuid, err := hash.ValidateJWT(bearertoken, cfg.JWTstring)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid jwt", "details": err.Error()})
+		return
+	}
 	if len(chirp.Body) > 140 {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -133,7 +149,7 @@ func (cfg *apiConfig) post(w http.ResponseWriter, r *http.Request) {
 
 	post, err := cfg.dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{
 		Body:   chirp.Body,
-		UserID: chirp.User_id,
+		UserID: jwtuuid,
 	})
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -149,7 +165,6 @@ func (cfg *apiConfig) post(w http.ResponseWriter, r *http.Request) {
 		"body":       post.Body,
 		"user_id":    post.UserID,
 	})
-
 }
 
 func (cfg *apiConfig) getchirps(w http.ResponseWriter, r *http.Request) {
@@ -183,8 +198,13 @@ func (cfg *apiConfig) specchirps(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(post)
 }
 
+type Loginreq struct {
+	Emailid  string `json:"email"`
+	Password string `json:"password"`
+}
+
 func (cfg *apiConfig) apilogin(w http.ResponseWriter, r *http.Request) {
-	var login Email
+	var login Loginreq
 	if err := json.NewDecoder(r.Body).Decode(&login); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -204,13 +224,33 @@ func (cfg *apiConfig) apilogin(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "wrongff pw buiddy", "details": err.Error()})
 		return
 	}
+	// here now they have successsfully lloggedin
+
+	jwtmade, err := hash.MakeJWT(user.ID, cfg.JWTstring, 3600*time.Second)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create JWT", "details": err.Error()})
+		return
+	}
+
+	refreshmade, err := hash.MakeRefreshToken()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to make refresh token", "details": err.Error()})
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":         user.ID,
-		"created_at": user.CreatedAt,
-		"updated_at": user.UpdatedAt,
-		"email":      user.Email,
+		"id":            user.ID,
+		"created_at":    user.CreatedAt,
+		"updated_at":    user.UpdatedAt,
+		"email":         user.Email,
+		"token":         jwtmade,
+		"refresh_token": refreshmade,
 	})
 }
 
@@ -226,6 +266,7 @@ func HttpServer() {
 	apiCfg := &apiConfig{
 		dbQueries: dbQueries,
 		PLATFORM:  os.Getenv("PLATFORM"),
+		JWTstring: os.Getenv("TOKEN"),
 	}
 	mux := http.NewServeMux()
 	server := http.Server{
@@ -236,10 +277,15 @@ func HttpServer() {
 	mux.HandleFunc("GET /api/healthz", readinessHandler)                                                       // check status
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir("."))))) // deliver files
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)                                                // metics
-	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)                                                   // reset usewrs                                                         // add user
-	mux.HandleFunc("POST /api/chirps", apiCfg.post)                                                            // add post
-	mux.HandleFunc("GET /api/chirps", apiCfg.getchirps)                                                        // get post of users
+	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
+
+	// post chrip
+	mux.HandleFunc("POST /api/chirps", apiCfg.post)
+	// gets all
+	mux.HandleFunc("GET /api/chirps", apiCfg.getchirps)
+	// gets chirp by id
 	mux.HandleFunc("GET /api/chirps/{id}", apiCfg.specchirps)
+	// api user, login reqs
 	mux.HandleFunc("POST /api/users", apiCfg.apiuser)
 	mux.HandleFunc("POST /api/login", apiCfg.apilogin)
 

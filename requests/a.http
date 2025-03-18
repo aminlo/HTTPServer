@@ -1,19 +1,9 @@
-# POST http://localhost:8080/api/users HTTP/1.1
-# Content-Type: application/json
-# Content-Length: 30
-
-# {
-#     "email": "tsesst@gmail.com"
-# }
-
-
 POST http://localhost:8080/api/chirps HTTP/1.1
 Content-Type: application/json
-Content-Length: 30
+Content-Length: 109
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJDaGlycHkiLCJzdWIiOiJmMDk3ODhmOC1iZDQwLTQ2OTQtOGZmNi0wMGJhNmE4MDQ0MjgiLCJleHAiOjE3NDIxNDQzNTQsImlhdCI6MTc0MjE0MDc1NH0.MKjzu39mYdxJfmz3RRTL8BGpzHa2xAmLshMtlA1WpLQ
 
 {
     "body": "If you're committed enough, you can make any story work.",
-    "user_id": "f8b75a17-6080-4442-9fe6-19c1b77053d3"
+    "user_id": "f09788f8-bd40-4694-8ff6-00ba6a804428"
 }
-
-# POST http://localhost:8080/admin/reset HTTP/1.1

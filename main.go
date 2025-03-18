@@ -267,6 +267,62 @@ func (cfg *apiConfig) apilogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (cfg *apiConfig) apirefresh(w http.ResponseWriter, r *http.Request) {
+	bearerToken, err := hash.GetBearerToken(r.Header)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid parsing header", "details": err.Error()})
+		return
+	}
+
+	rtoken, err := cfg.dbQueries.GetRToken(r.Context(), bearerToken)
+	if err != nil || rtoken.ExpiresAt.Before(time.Now()) || rtoken.RevokedAt.Valid {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid or expired refresh token", "details": err.Error()})
+		return
+	}
+
+	jwtmade, err := hash.MakeJWT(rtoken.UserID, cfg.JWTstring, 3600*time.Second)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create JWT", "details": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"token": jwtmade,
+	})
+}
+
+func (cfg *apiConfig) apirevoke(w http.ResponseWriter, r *http.Request) {
+	bearerToken, err := hash.GetBearerToken(r.Header)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid parsing header", "details": err.Error()})
+		return
+	}
+
+	err = cfg.dbQueries.RevokeRToken(r.Context(), database.RevokeRTokenParams{
+		Token:     bearerToken,
+		RevokedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to revoke token", "details": err.Error()})
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func HttpServer() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -302,6 +358,7 @@ func HttpServer() {
 	mux.HandleFunc("POST /api/users", apiCfg.apiuser)
 	mux.HandleFunc("POST /api/login", apiCfg.apilogin)
 	mux.HandleFunc("POST /api/refresh", apiCfg.apirefresh)
+	mux.HandleFunc("POST /api/revoke", apiCfg.apirevoke)
 
 	log.Println("Starting server on :8080")
 	if err := server.ListenAndServe(); err != nil {
